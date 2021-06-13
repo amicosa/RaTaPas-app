@@ -1,0 +1,422 @@
+---
+title: "Report Random Tapas"
+date: "1/5/2021"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    
+params:
+  type: NULL
+  phylo1: NULL
+  mphylo1: NULL 
+  phylo2: NULL
+  mphylo2: NULL 
+  relmat: NULL
+  reps: NULL 
+  dupli: NULL 
+  n: NULL
+  paco.ss: NULL 
+  paco.warn: NULL
+  paco.ei.corr: NULL 
+  percentile: NULL
+  link.res.fq: NULL 
+  below.p: NULL
+  colscale: NULL 
+  n.breaks: NULL
+  node.tag: NULL
+  
+bibliography: bibliography.bib
+nocite: | 
+  @Random, @PACo, @R
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+setwd("C:/Users/anmis/Desktop/trees")
+```
+
+```{r librerias}
+library(paco)
+library(phytools)
+library(distory)
+library(GiniWegNeg)
+library(parallel)
+```
+
+# Parameters
+
+* The number of runs selected is: `r params$reps`
+* The maximum number of n unique associations is: `r params$n`
+* Assume symmetry in procrustes analysis: `r params$paco.ss`
+* Correction used calculating the eigenvalues: `r params$paco.ei.corr`
+* The percentile choosen is: `r params$percentile`
+* Compute the Observed-Expected frequency: `r params$link.res.fq`
+* Use only the associations below the percentile: `r params$below.p`
+
+
+```{r funciones Random TaPas}
+trimHS.maxC <- function (N, HS, n, check.unique= FALSE) {
+trim.int <- function (x, HS, n) {
+HS.LUT <- which(HS == 1, arr.in= TRUE)
+HS.LUT <- cbind(HS.LUT, 1:nrow(HS.LUT))
+df <- as.data.frame(HS.LUT)
+hs.lut <- subset(df[sample(nrow(df)), ],
+!duplicated(row) & !duplicated(col))
+if (nrow(hs.lut) < n) hs <- NULL else {
+hs.lut <- hs.lut[sample(nrow(hs.lut), n), ]
+hs <- diag(nrow(hs.lut))
+rownames(hs) <- rownames(HS[hs.lut[ ,1], ])
+colnames(hs) <- colnames(HS[ ,hs.lut[ ,2]])
+return(hs)
+}
+}
+trim.HS <- lapply(1:N, trim.int, HS= HS, n= n )
+if (check.unique == TRUE) trim.HS <- unique(trim.HS)
+if (length(trim.HS) < N) warning("No. of trimmed H-S assoc. matrices < No. of runs")
+return(trim.HS)
+}
+
+paco.ss <- function (hs, treeH, treeS, symmetric= FALSE,
+proc.warns= FALSE, ei.correct= "none") {
+eigen.choice <- c("none", "lingoes", "cailliez", "sqrt.D")
+if (ei.correct %in% eigen.choice == FALSE)
+stop(writeLines("Invalid eigenvalue correction parameter.\r
+Correct choices are 'none', 'lingoes', 'cailliez' or 'sqrt.D'"))
+treeh <- ape::drop.tip(treeH, setdiff(treeH$tip.label, rownames(hs)))
+trees <- ape::drop.tip(treeS, setdiff(treeS$tip.label, colnames(hs)))
+# Reorder hs as per tree labels:
+hs <- hs[treeh$tip.label, trees$tip.label]
+DH <- cophenetic(treeh)
+DP <- cophenetic(trees)
+if (ei.correct == "sqrt.D"){DH <- sqrt(DH) ; DP <- sqrt(DP); ei.correct="none"}
+D <- paco::prepare_paco_data(DH, DP, hs)
+D <- paco::add_pcoord(D, correction= ei.correct)
+if (proc.warns == FALSE) D <- vegan::procrustes(D$H_PCo, D$P_PCo,
+symmetric = symmetric) else
+D <- suppressWarnings(vegan::procrustes(D$H_PCo, D$P_PCo,
+symmetric = symmetric))
+return(D$ss)
+}
+
+link.freq <- function (x, fx, HS, percentile= 0.01,
+sep= "-", below.p= FALSE, res.fq= TRUE) {
+if (below.p == TRUE)
+percent <- which(fx <= quantile(fx, percentile)) else
+percent <- which(fx >= quantile(fx, percentile))
+trim.HS <- x[percent]
+paste.link.names <- function(X, sep) {
+X.bin <- which(X>0, arr.in=TRUE)
+Y <- diag(nrow(X.bin))
+Y <- diag(nrow(X.bin))
+rownames(Y) <- rownames(X)[X.bin[,1]]
+colnames(Y) <- colnames(X)[X.bin[,2]]
+pln <- paste(rownames(Y), colnames(Y), sep=sep)
+return(pln)
+}
+link.names <- t(sapply(trim.HS, paste.link.names, sep=sep))
+lf <- as.data.frame(table(link.names))
+HS.LUT <- which(HS ==1, arr.in=TRUE)
+linkf <- as.data.frame(cbind(rownames(HS)[HS.LUT[,1]],
+colnames(HS)[HS.LUT[,2]]))
+colnames(linkf) <- c('H', 'S')
+linkf$HS <- paste(linkf[,1], linkf[,2], sep=sep)
+linkf$Freq <- rep(0, nrow(linkf))
+linkf[match(lf[,1], linkf[,3]), 4] <- lf[,2]
+linkf2 <- linkf
+if (res.fq == TRUE) {
+link.names.all <- t(sapply(x, paste.link.names, sep=sep))
+lf.all <- as.data.frame(table(link.names.all))
+linkf.all <- as.data.frame(cbind(rownames(HS)[HS.LUT[,1]],
+colnames(HS)[HS.LUT[,2]]))
+colnames(linkf.all) <- c('H', 'S')
+linkf.all$HS <- paste(linkf.all[,1], linkf.all[,2], sep=sep)
+linkf.all$Freq <- rep(0, nrow(linkf.all))
+linkf.all[match(lf.all[,1], linkf.all[,3]), 4] <- lf.all[,2]
+w <- linkf.all[,4]
+w <- as.matrix(w*percentile)
+wFq <- linkf$Freq - w
+linkf$wFq <- wFq
+} else linkf <- linkf2
+return(linkf)
+}
+
+One2one.f <- function (hs, reps= 1e+4) {
+HS.LUT <- which(hs ==1, arr.in=TRUE)
+HS.LUT <- cbind(HS.LUT,1:nrow(HS.LUT))
+df <- as.data.frame(HS.LUT)
+V <- rep(NA,reps)
+for(i in 1:reps){
+hs.lut <- subset(df[sample(nrow(df)),],
+!duplicated(row) & !duplicated(col))
+n <- sum(HS)
+while (n >0) {
+n <- n-1;
+if (nrow(hs.lut) == n) break
+}
+V[i]<- n
+}
+V <- min(V)
+return(V)
+}
+
+tangle.gram <- function(treeH, treeS, hs, colscale= "diverging", colgrad,
+nbreaks=50, fqtab, res.fq= TRUE, node.tag=TRUE,
+cexpt=1, ...) {
+colscale.choice <- c("diverging", "sequential")
+if (colscale %in% colscale.choice == FALSE)
+stop(writeLines("Invalid colscale parameter.\r
+Correct choices are 'diverging', 'sequential'"))
+colscale.range <- function(x) {
+rescale.range <- function(x) {
+xsq <- round(x)
+if(colscale=="sequential") {
+y <- range(xsq)
+col_lim <- (y[1]:y[2])-y[1]+1
+xsq <- xsq-y[1]+1
+new.range <- list(col_lim, xsq)
+} else {
+x1 <- x[which(x<0)]
+if(length(x1) < 2) stop("Not enough negative values for diverging scale.
+Choose colscale= 'sequential' instead")
+x2 <- x[which(x >= 0)]
+x1 <- round(x1)
+x2 <- round(x2)
+y <- max(abs(x))
+col_lim <- (-y:y) + y + 1
+y1 <- range(x1)
+y2 <- range(x2)
+x1 <- x1-y1[1]+1
+x2 <- x2-y2[1]+1
+new.range <- list(col_lim, x1, x2)
+}
+return(new.range)
+}
+if(colscale=="sequential") {
+NR <- rescale.range(x)
+rbPal <- colorRampPalette(colgrad)
+linkcolor <- rbPal(nbreaks)[as.numeric(cut(NR[[1]], breaks = nbreaks))]
+NR <- NR[[2]]
+linkcolor <- linkcolor[NR]
+} else {
+NR <- rescale.range(x)
+NR.neg <- NR[[1]] [which (NR[[1]] <= max(NR[[2]]))]
+NR.pos <- NR[[1]] [-NR.neg] - max(NR[[2]])
+m <- median(1:length(colgrad))
+colgrad.neg <- colgrad[which(1:length(colgrad) <= m)]
+colgrad.pos <- colgrad[which(1:length(colgrad) >= m)]
+rbPal <- colorRampPalette(colgrad.neg)
+linkcolor1 <- rbPal(nbreaks)[as.numeric(cut(NR.neg, breaks = nbreaks))]
+rbPal <- colorRampPalette(colgrad.pos)
+linkcolor2 <- rbPal(nbreaks)[as.numeric(cut(NR.pos, breaks = nbreaks))]
+linkcolor1 <- linkcolor1[NR[[2]]]
+linkcolor2 <- linkcolor2[NR[[3]]]
+linkcolor <- rep(NA, length(x))
+linkcolor[which(x< 0)] <- linkcolor1
+linkcolor[which(x>=0)] <- linkcolor2
+}
+return(linkcolor)
+}
+FQ <- ifelse(res.fq==FALSE, 4 ,5) # determines freq column to evaluate
+if (res.fq ==FALSE & colscale== "diverging") {colscale = "sequential"
+warning("Colscale 'diverging' does not take effect when res.fq = FALSE.
+The color scale shown is sequential")
+}
+LKcolor <- colscale.range(fqtab[,FQ])
+HS.lut <- which(hs ==1, arr.ind=TRUE)
+linkhs <- cbind(rownames(hs)[HS.lut[,1]], colnames(hs)[HS.lut[,2]])
+obj <- phytools::cophylo(treeH,treeS, linkhs)
+phytools::plot.cophylo(obj, link.col=LKcolor, ...)
+Hfreq <- aggregate(fqtab[,FQ], by=list(freq = fqtab[,1]), FUN=mean)
+Sfreq <- aggregate(fqtab[,FQ], by=list(freq = fqtab[,2]), FUN=mean)
+Hfreq <- Hfreq[match(obj$trees[[1]]$tip.label, Hfreq$freq),]
+Sfreq <- Sfreq[match(obj$trees[[2]]$tip.label, Sfreq$freq),]
+Hfreq$x[which(is.na(Hfreq$x))]<-0
+Sfreq$x[which(is.na(Sfreq$x))]<-0
+if (node.tag==TRUE){
+fit.H <- phytools::fastAnc(obj$trees[[1]],Hfreq[,2])
+fit.S <- phytools::fastAnc(obj$trees[[2]],Sfreq[,2])
+NLH <- colscale.range (fit.H)
+NLS <- colscale.range (fit.S)
+phytools::nodelabels.cophylo(pch=16, col=NLH, cex=cexpt)
+phytools::nodelabels.cophylo(pch=16, col=NLS, cex=cexpt, which="right")
+}
+TLH <- colscale.range (Hfreq[,2])
+TLS <- colscale.range (Sfreq[,2])
+phytools::tiplabels.cophylo(pch=16, col=TLH, cex=cexpt)
+phytools::tiplabels.cophylo(pch=16, col=TLS, cex=cexpt, which="right")
+}
+
+
+```
+
+```{r, reading data}
+setwd("C:/Users/anmis/Desktop/trees")
+
+if(params$type=="Nexus"){
+  TreeH<-read.nexus(params$phylo1)
+  TreeS<-read.nexus(params$phylo2)
+  mTreeH<-read.nexus(params$mphylo1)
+  mTreeS<-read.nexus(params$mphylo2)
+  HS<-read.table(params$relmat, row.names = 1, header = T)
+  HS<-as.matrix(HS)
+}
+
+if(params$type=="Newick"){
+  TreeH<-read.tree(params$phylo1)
+  TreeS<-read.tree(params$phylo2)
+  mTreeH<-read.tree(params$mphylo1)
+  mTreeS<-read.tree(params$mphylo2)
+  HS<-read.table(params$relmat, row.names = 1, header = T)
+  HS<-as.matrix(HS)
+}
+
+hosts<-paste0(rep(" %s", length(TreeH$tip.label)), collapse=",")
+symb<-paste0(rep(" %s", length(TreeS$tip.label)), collapse=",")
+
+cap1<-paste0("Tanglegram of the associations between the hosts:", hosts, " and the symbionts:", symb, collapse = "")
+hosts<-TreeH$tip.label
+symb<-TreeS$tip.label
+```
+
+
+# Tanglegram
+
+Plain tanglegram representing the associations between the two
+phylogenies. The number of species of the host phylogeny is: `r length(TreeH$tip.label)`,
+the number of species of the symbiont phylogeny is `r length(TreeS$tip.label)`.
+The number of associations between the two phylogenies is `r sum(HS)`.
+
+```{r, plain tanglegram, fig.cap="Tanglegram showing the associations betweewn the two philogenies"}
+HS.lut <- which(HS ==1, arr.ind=TRUE)
+linkhs <- cbind(rownames(HS)[HS.lut[,1]], colnames(HS)[HS.lut[,2]])
+obj <- cophylo(TreeH,TreeS, linkhs)
+plot.cophylo(obj, link.lwd=1, link.lty=2, fsize=0.5, pts=FALSE, link.type="curved")
+```
+
+
+```{r, computing the procrustes sum square residuals}
+N= params$reps
+n=params$n
+if(params$paco.ss == TRUE){
+  sim<-TRUE
+}else{
+  sim<-FALSE
+}
+
+perc<-as.numeric(params$percentile)
+
+THS <- trimHS.maxC(N, HS, n=n, check.unique=params$dupli)
+THS[sapply(THS, is.null)] <- NULL
+
+PACO <- sapply(THS, paco.ss, treeH=TreeH, treeS= TreeS, ei.correct = params$paco.ei.corr,
+symmetric = sim)
+
+LFPACO01 <- link.freq(THS, PACO, HS, percentile=perc)
+
+PACO01 <- matrix(NA, length(mTreeH), nrow(LFPACO01))
+```
+
+
+# Extracting the partial tanglegrams
+
+A total of `r length(THS)` different partial tanglegrams have been extracted 
+from the cophylogeny.
+
+```{r, fig.cap="Four random tanglegrams computed by the function trimHS.maxC"}
+par(mfrow = c(2,2), oma = rep(2,4))
+
+randomtree<-sample(1:length(THS), replace = F, size = 4)
+
+for (i in randomtree) {
+  hs<-THS[[i]]
+  HS.lut <- which(hs ==1, arr.ind=TRUE)
+  linkhs <- cbind(rownames(hs)[HS.lut[,1]], colnames(hs)[HS.lut[,2]])
+  treeh <- ape::drop.tip(TreeH, setdiff(TreeH$tip.label, rownames(hs)))
+  trees <- ape::drop.tip(TreeS, setdiff(TreeS$tip.label, colnames(hs)))
+  obj<-cophylo(tr1 =  treeh,tr2 =  trees,assoc =  linkhs)
+  plot.cophylo(obj,link.type = "curved")
+}
+```
+
+# Distribution of the statistics
+
+```{r, fig.cap="Distribution of the SSR of PACo analyses"}
+dens<-density(PACO)
+quan<-quantile(PACO, probs = 0.01)
+
+plot(dens, main = "Density plot of the distribution of the SSR of PACo",
+     xlab = "sum of squared residuals of PACo")
+abline(v=quan, col = "red")
+```
+
+```{r, Average residual frequency distributions}
+cores <- detectCores()
+cl <- makeCluster(cores-2)
+warn<-params$paco.warn
+# use no CPUs - 2 for parallel computing
+
+for(i in 1:length(mTreeH))
+# CIs PACo
+{
+PA.CI<-parallel::parSapply(cl, THS, paco.ss, treeH=mTreeH[[i]],
+treeS= mTreeS[[i]], symmetric=sim, proc.warns = warn)
+LFPA01.CI <- link.freq(THS, PA.CI, HS, percentile=0.01)
+PACO01[i,] <- LFPA01.CI[,5]
+}
+stopCluster(cl)
+
+
+colnames(PACO01) <- LFPACO01[,3]
+
+
+PACO.LO <- apply(PACO01, 2, quantile, 0.025)
+PACO.HI <- apply(PACO01, 2, quantile, 0.975)
+PACO.AV <- apply(PACO01, 2, mean)
+cap4<-sprintf("Average residual frequency distributions (observed – expected frequencies) of host-symbiont applying Random TaPas with PACo , N = %s, n = %.0f and p = %.2f. Vertical lines represent 95 percent confidence intervals of the residual frequencies
+computed empirically with %.0f randomly chosen pairs of trees used to build the consensus trees", N, n, perc, length(mTreeH))
+```
+
+# Residual frequencies per association plot
+
+```{r, plotting OE frequencies, fig.cap=cap4}
+op <- par(mgp = c(2.2, 0.3, 0), mar=c(3.5,3.2,3,1), tck=0.01,
+oma = c(5.4, 0, 0, 0), xpd=NA)
+link.fq <-barplot(PACO.AV, xaxt='n',
+horiz=FALSE, cex.names = 0.6, las=2, cex.axis=0.8,
+ylab="Observed - Expected frequency",col="lightblue", main = "Average Residual Frequencies per association with PACo")
+suppressWarnings(arrows(link.fq, PACO.HI, link.fq, PACO.LO, length= 0,
+angle=90, code=3, col="darkblue"))
+axis(side=1, at=link.fq[1:length(PACO.AV)], labels=LFPACO01$HS, las=2,
+tick = FALSE, line= 1, cex.axis=0.6)
+par(op)
+
+cap5<-sprintf("Normalized Gini coefficient of the residual frequency distributions applying Random TaPas with PACo to the consensus trees (asterisk) and to %.0f randomly chosen trees used to build the consensus trees", length(mTreeH))
+```
+# Normalized Gini coefficients
+
+```{r, plotting Ginnis coef, fig.cap=cap5}
+GiniPA <- unlist(Gini_RSV(LFPACO01[,5]))
+GiniMPA <- unlist(apply(PACO01, 1, Gini_RSV))
+boxplot(GiniMPA, ylab="Normalized Gini coefficient of PACo frequencies residuals",
+col="lightblue", las=3)
+text(2,GiniPA,"*",cex=2, col="red")
+```
+
+* The average Gini coefficient is `r GiniPA`
+
+# Tanglegram mapped
+
+```{r, plotting tanglegram heatmap, fig.cap = "Tanglegram representing the association between hosts and symbionts. The residual frequency corresponding to each host-symbiont association is mapped using a color scale centered at light gray (zero) ranging from dark red (lowest) to dark blue (highest). The average residual frequency of occurrence of each terminal and fast maximum likelihood estimators of ancestral states of each node are also mapped according to the same scale."}
+trh <- compute.brtime(TreeH, TreeH$Nnode:1)
+trs <- compute.brtime(TreeS, TreeS$Nnode:1)
+col.scale <- c("darkred","gray90", "darkblue")
+tangle.gram(trh, trs, HS, colscale= params$colscale, colgrad=col.scale,
+nbreaks=as.numeric(params$n.breaks), LFPACO01, res.fq=params$link.res.fq, link.lwd=1, link.lty=1, fsize=0.5,
+pts=FALSE, link.type="curved", node.tag=params$node.tag,
+cexpt=1.2, ftype="reg")
+```
+
+
+# References

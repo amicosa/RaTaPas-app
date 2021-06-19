@@ -34,7 +34,6 @@ nocite: |
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
-setwd("C:/Users/anmis/Desktop/trees")
 ```
 
 ```{r librerias}
@@ -51,7 +50,7 @@ library(parallel)
 * The maximum number of n unique associations is: `r params$n`
 * Assume symmetry in procrustes analysis: `r params$paco.ss`
 * Correction used calculating the eigenvalues: `r params$paco.ei.corr`
-* The percentile choosen is: `r params$percentile`
+* The chosen percentile is: `r params$percentile`
 * Compute the Observed-Expected frequency: `r params$link.res.fq`
 * Use only the associations below the percentile: `r params$below.p`
 
@@ -252,7 +251,6 @@ phytools::tiplabels.cophylo(pch=16, col=TLS, cex=cexpt, which="right")
 ```
 
 ```{r, reading data}
-setwd("C:/Users/anmis/Desktop/trees")
 
 if(params$type=="Nexus"){
   TreeH<-read.nexus(params$phylo1)

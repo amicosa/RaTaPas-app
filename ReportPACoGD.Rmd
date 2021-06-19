@@ -27,7 +27,7 @@ params:
   n.breaks: NULL
   node.tag: NULL
   
-bibliography: blibliography.bib
+bibliography: bibliography.bib
 nocite: | 
   @Random, @PACo, @R, @GD
 ---
@@ -50,7 +50,7 @@ library(parallel)
 * The maximum number of n unique associations is: `r params$n`
 * Assume symmetry in procrustes analysis: `r params$paco.ss`
 * Correction used calculating the eigenvalues: `r params$paco.ei.corr`
-* The percentile choosen is: `r params$percentile`
+* The chosen percentile is: `r params$percentile`
 * Compute the Observed-Expected frequency: `r params$link.res.fq`
 * Use only the associations below the percentile: `r params$below.p`
 
@@ -301,16 +301,22 @@ obj <- cophylo(TreeH,TreeS, linkhs)
 plot.cophylo(obj, link.lwd=1, link.lty=2, fsize=0.5, pts=FALSE, link.type="curved")
 ```
 
-```{r, plotting the optimal number of n associations for Random TaPas}
-N = params$reps
-```
-
 # Extracting the partial tanglegrams
 
-A total of `r length(THS)` different partial tanglegrams have been extracted 
-from the cophylogeny.
-
 ```{r, fig.cap="Four random tanglegrams computed by the function trimHS.maxC"}
+n <- params$n
+N <- params$reps
+if(params$paco.ss == TRUE){
+  sim<-TRUE
+}else{
+  sim<-FALSE
+}
+
+perc<-as.numeric(params$percentile)
+
+THS <- trimHS.maxC(N, HS, n=n, check.unique=params$dupli)
+THS[sapply(THS, is.null)] <- NULL
+
 par(mfrow = c(2,2), oma = rep(2,4))
 
 randomtree<-sample(1:length(THS), replace = F, size = 4)
@@ -326,20 +332,12 @@ for (i in randomtree) {
 }
 ```
 
+A total of `r length(THS)` different partial tanglegrams have been extracted 
+from the cophylogeny.
+
 # Distribution of the statistics
 
 ```{r, computing the geodesic distances and the procrustes sum square residuals, fig.cap="Distribution of the Geodesic distances and SSR of PACo analyses"}
-n = params$n
-if(params$paco.ss == TRUE){
-  sim<-TRUE
-}else{
-  sim<-FALSE
-}
-
-perc<-as.numeric(params$percentile)
-
-THS <- trimHS.maxC(N, HS, n=n, check.unique=params$dupli)
-THS[sapply(THS, is.null)] <- NULL
 GD <- sapply(THS, geo.D, treeH=TreeH, treeS= TreeS)
 PACO <- sapply(THS, paco.ss, treeH=TreeH, treeS= TreeS, ei.correct = params$paco.ei.corr,
 symmetric = sim)
@@ -362,7 +360,7 @@ plot(densGD, main = "Density plot of the distribution of the Geodesic Distances"
 abline(v=quanGD, col = "red")
 plot(densPACO, main = "Density plot of the distribution of the SSR of PACo",
      xlab = "sum of squared residuals of PACo")
-abline(v=quanGD, col = "red")
+abline(v=quanPACO, col = "red")
 par(mfrow = c(1,1))
 ```
 
@@ -445,7 +443,7 @@ text(2,GiniPA,"*",cex=2, col="red")
 
 # Heatmap tanglegram with the Geodesic distance estimations
 
-```{r, plotting tanglegram heatmap, fig.cap = "Tanglegram representing the association between hosts and symbionts. The residual frequency computed using the geodesic distances corresponding to each host-symbiont association is mapped using a color scale centered at light gray (zero) ranging from dark red (lowest) to dark blue (highest). The average residual frequency of occurrence of each terminal and fast maximum likelihood estimators of ancestral states of each node are also mapped according to the same scale."}
+```{r, plotting tanglegram heatmap 1, fig.cap = "Tanglegram representing the association between hosts and symbionts. The residual frequency computed using the geodesic distances corresponding to each host-symbiont association is mapped using a color scale centered at light gray (zero) ranging from dark red (lowest) to dark blue (highest). The average residual frequency of occurrence of each terminal and fast maximum likelihood estimators of ancestral states of each node are also mapped according to the same scale."}
 trh <- compute.brtime(TreeH, TreeH$Nnode:1)
 trs <- compute.brtime(TreeS, TreeS$Nnode:1)
 col.scale <- c("darkred","gray90", "darkblue")
@@ -457,7 +455,7 @@ cexpt=1.2, ftype="reg")
 
 # Heatmap tanglegram with the PACo estimations
 
-```{r, plotting tanglegram heatmap, fig.cap = "Tanglegram representing the association between hosts and symbionts. The residual frequency computed using PACo corresponding to each host-symbiont association is mapped using a color scale centered at light gray (zero) ranging from dark red (lowest) to dark blue (highest). The average residual frequency of occurrence of each terminal and fast maximum likelihood estimators of ancestral states of each node are also mapped according to the same scale."}
+```{r, plotting tanglegram heatmap 2, fig.cap = "Tanglegram representing the association between hosts and symbionts. The residual frequency computed using PACo corresponding to each host-symbiont association is mapped using a color scale centered at light gray (zero) ranging from dark red (lowest) to dark blue (highest). The average residual frequency of occurrence of each terminal and fast maximum likelihood estimators of ancestral states of each node are also mapped according to the same scale."}
 trh <- compute.brtime(TreeH, TreeH$Nnode:1)
 trs <- compute.brtime(TreeS, TreeS$Nnode:1)
 col.scale <- c("darkred","gray90", "darkblue")

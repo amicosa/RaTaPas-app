@@ -163,9 +163,9 @@ server <- function(input, output, session) {
             for(i in 1:length(X)) {
                 THS <- trimHS.maxC(input$reps, HS = hs, n=X[i], check.unique=TRUE)
                 Y[i] <- length(THS)  
-            }
+        }
             plot(X,Y, type="b", xlab="Number of unique H-S associations",
-                ylab="Number of runs accomplished")
+                 ylab="Number of runs accomplished")
             axis(side = 1, at = X,labels = T)
         }
     })
